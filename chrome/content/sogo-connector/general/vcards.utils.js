@@ -20,6 +20,8 @@
 
 let kPhotoImageCache = "SOGoImageCache";
 
+Components.utils.import("resource://gre/modules/Services.jsm");
+
 function jsInclude(files, target) {
     let loader = Components.classes["@mozilla.org/moz/jssubscript-loader;1"]
                            .getService(Components.interfaces.mozIJSSubScriptLoader);
@@ -900,9 +902,9 @@ function photoFileFromName(photoName, inSOGoCache) {
 function photoContent(uri) {
     let content = null;
 
-    let ios = Components.classes["@mozilla.org/network/io-service;1"]
-                        .getService(Components.interfaces.nsIIOService);
-    let fileURL = ios.newURI(uri, null, null);
+    //let ios = Components.classes["@mozilla.org/network/io-service;1"]
+    //                    .getService(Components.interfaces.nsIIOService);
+    let fileURL = Services.io.newURI(uri, null, null);
     let file = fileURL.QueryInterface(Components.interfaces.nsIFileURL).file;
 
     let rd;
@@ -937,13 +939,19 @@ function importPhoto(photoType, content) {
     let photoFile = null;
 
     if (content && content.length > 0) {
-        let ext = deducePhotoExtFromTypes(photoType);
-        if (ext) {
-            photoFile = saveImportedPhoto(content, ext);
+        if (photoType) {
+            let ext = deducePhotoExtFromTypes(photoType);
+            if (ext) {
+                photoFile = saveImportedPhoto(content, ext);
+            }
+            else {
+                dump("vcards.utils: no extension returned for photo file\n");
+            }
         }
         else {
-            dump("vcards.utils: no extension returned for photo file\n");
-        }
+          dump("vcards.utils: no photo type provided, assuming jpg\n");
+          photoFile = saveImportedPhoto(content, 'jpg');
+       }
     }
     else {
         dump("vcards.utils: no content provided\n");

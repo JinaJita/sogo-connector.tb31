@@ -1,6 +1,6 @@
 /* CardDAVDirectoryFactory.js - This file is part of "SOGo Connector", a Thunderbird extension.
  *
- * Copyright: Inverse inc., 2006-2014
+ * Copyright: Inverse inc., 2006-2018
  *     Email: support@inverse.ca
  *       URL: http://inverse.ca
  *
@@ -19,7 +19,13 @@
  */
 
 Components.utils.import("resource://gre/modules/XPCOMUtils.jsm");
-Components.utils.import("resource://gre/modules/Services.jsm");
+//Components.utils.import("resource://gre/modules/Services.jsm");
+Components.utils.import("resource:///modules/mailServices.js");
+
+//ChromeUtils.import("resource://gre/modules/XPCOMUtils.jsm");
+//ChromeUtils.import("resource://gre/modules/Services.jsm");
+//ChromeUtils.import("resource:///modules/mailServices.js");
+//ChromeUtils.import("resource:///modules/IOUtils.js");
 
 //class constructor
 function CardDAVDirectoryFactory() {
@@ -43,7 +49,7 @@ CardDAVDirectoryFactory.prototype = {
     getHelperForLanguage: function cDACLM_getHelperForLanguage(language) {
         return null;
     },
-    implementationLanguage: Components.interfaces.nsIProgrammingLanguage.JAVASCRIPT,
+    //implementationLanguage: Components.interfaces.nsIProgrammingLanguage.JAVASCRIPT,
     flags: 0,
 
     /* nsIAbDirFactory */
@@ -54,11 +60,19 @@ CardDAVDirectoryFactory.prototype = {
              + "\n  aPrefId: " + aPrefId + "\n");
 
         let baseArray = Components.classes["@mozilla.org/array;1"]
-                                  .createInstance(Components.interfaces.nsIMutableArray);
-        let abManager = Components.classes["@mozilla.org/abmanager;1"]
-                                  .getService(Components.interfaces.nsIAbManager);
-        let directory = abManager.getDirectory("moz-abdavdirectory://" + aPrefId);
+            .createInstance(Components.interfaces.nsIMutableArray);
+      try {
+        let directoryURI = "moz-abdavdirectory://" + aPrefId;
+        dump("Getting directory at URI: " + directoryURI + "\n");
+        //let abManager = Components.classes["@mozilla.org/abmanager;1"]
+        //    .getService(Components.interfaces.nsIAbManager);
+        //let directory = abManager.getDirectory(directoryURI);
+        //let directory = GetDirectoryFromURI(directoryURI);
+        let directory = MailServices.ab.getDirectory(directoryURI);
         baseArray.appendElement(directory, false);
+      } catch (e) {
+        dump("Error in getDirectories(): " + e + "\n");
+      }
         let directoryEnum = baseArray.enumerate();
 
         return directoryEnum;

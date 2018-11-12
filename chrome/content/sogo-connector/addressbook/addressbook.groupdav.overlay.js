@@ -1,7 +1,6 @@
 /* addressbook.groupdav.overlay.js - This file is part of "SOGo Connector", a Thunderbird extension.
  *
- * Copyright: Inverse inc., 2006-2010
- *    Author: Robert Bolduc, Wolfgang Sourdeau
+ * Copyright: Inverse inc., 2006-2018
  *     Email: support@inverse.ca
  *       URL: http://inverse.ca
  *
@@ -18,6 +17,8 @@
  * "SOGo Connector"; if not, write to the Free Software Foundation, Inc., 51
  * Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
  */
+
+Components.utils.import("resource://gre/modules/Services.jsm");
 
 function jsInclude(files, target) {
     let loader = Components.classes["@mozilla.org/moz/jssubscript-loader;1"]
@@ -180,12 +181,12 @@ abDirTreeObserver.SCOnDrop = function(row, or, dataTransfer) {
         && isGroupdavDirectory(sourceDirectory.URI)) {
       if (dragSession.dragAction
           == Components.interfaces.nsIDragService.DRAGDROP_ACTION_MOVE) {
-        cards = this._getDroppedCardsKeysFromSession(dragSession, gAbView);
+        cards = this._getDroppedCardsKeysFromSession(gAbView, dataTransfer);
         for (let i = 0; i < cards.length; i++) {
           this._pushCardKey(cards[i], cardKeys);
         }
       }
-      this._resetDroppedCardsVersionFromSession(dragSession, gAbView, dataTransfer);
+      this._resetDroppedCardsVersionFromSession(gAbView, dataTransfer);
     }
 
     let proceed = true;
@@ -226,47 +227,24 @@ abDirTreeObserver.SCOnDrop = function(row, or, dataTransfer) {
   }
 };
 
-abDirTreeObserver._getDroppedCardsKeysFromSession = function(dragSession, abView) {
-  let cards = [];
-  let trans = Components.classes["@mozilla.org/widget/transferable;1"]
-      .createInstance(Components.interfaces.nsITransferable);
-  trans.init(null);
-  trans.addDataFlavor("moz/abcard");
-  trans.addDataFlavor("text/unicode");
-
-  for (let i = 0; i < dragSession.numDropItems; i++) {
-    dragSession.getData(trans, i);
-    let dataObj = new Object();
-    let bestFlavor = new Object();
-    let len = new Object();
-    try	{
-      trans.getAnyTransferData(bestFlavor, dataObj, len);
-      dataObj = dataObj.value.QueryInterface(Components.interfaces.nsISupportsString);
-      let transData = dataObj.data.split("\n");
-      let rows = transData[0].split(",");
-
-      for (let j = 0; j < rows.length; j++) {
-        let card = abView.getCardFromRow(rows[j]);
-        if (card) {
-          cards.push(card);
-        }
-      }
-      //dump("cards: " + cards.length + "\n");
-    }
-    catch (ex) {
-      dump("ex: " + ex + "\n");
-    }
-  }
-  return cards;
-};
-
-abDirTreeObserver._resetDroppedCardsVersionFromSession = function(dragSession, abView, dataTransfer) { 
+abDirTreeObserver._getDroppedCardsKeysFromSession = function(abView, dataTransfer) {
   var rows = dataTransfer.getData("moz/abcard").split(",").map(j => parseInt(j, 10));
   var numrows = rows.length;
   let cards = [];
 
   for (let j = 0; j < numrows; j++) {
-    cards.push(gAbView.getCardFromRow(rows[j]));
+    cards.push(abView.getCardFromRow(rows[j]));
+  }
+  return cards;
+};
+
+abDirTreeObserver._resetDroppedCardsVersionFromSession = function(abView, dataTransfer) {
+  var rows = dataTransfer.getData("moz/abcard").split(",").map(j => parseInt(j, 10));
+  var numrows = rows.length;
+  let cards = [];
+
+  for (let j = 0; j < numrows; j++) {
+    cards.push(abView.getCardFromRow(rows[j]));
   }
 
   for (let card of cards) {
@@ -428,28 +406,126 @@ function _deleteGroupDAVComponentWithKey(prefService,
 }
 
 function SCAbConfirmDelete(types) {
-    let confirm = false;
+  let confirm = false;
 
-    if (types != kNothingSelected) {
-        let promptService = Components.classes["@mozilla.org/embedcomp/prompt-service;1"]
-                                      .getService(Components.interfaces.nsIPromptService);
+  if (types != kNothingSelected) {
+    // Determine strings for smart and context-sensitive user prompts
+    // for confirming deletion.
+    let confirmDeleteTitleID;
+    let confirmDeleteTitle;
+    let confirmDeleteMessageID;
+    let confirmDeleteMessage;
+    let itemName;
+    let containingListName;
+    let selectedDir = getSelectedDirectory();
+    let numSelectedItems = gAbView.selection.count;
 
-        let confirmDeleteMessage;
-        if (types == kListsAndCards)
-            confirmDeleteMessage = gAddressBookBundle.getString("confirmDeleteListsAndContacts");
-        else if (types == kMultipleListsOnly)
-            confirmDeleteMessage = gAddressBookBundle.getString("confirmDeleteMailingLists");
-        else if (types == kCardsOnly && gAbView && gAbView.selection) {
-             if (gAbView.selection.count < 2)
-                 confirmDeleteMessage = gAddressBookBundle.getString("confirmDeleteContact");
-             else
-                 confirmDeleteMessage = gAddressBookBundle.getString("confirmDeleteContacts");
+    switch(types) {
+    case kListsAndCards:
+      confirmDeleteMessageID = "confirmDelete2orMoreContactsAndLists";
+      confirmDeleteTitleID   = "confirmDelete2orMoreContactsAndListsTitle";
+      break;
+    case kSingleListOnly:
+      // Set item name for single mailing list.
+      let theCard = GetSelectedAbCards()[0];
+      itemName = theCard.displayName;
+      confirmDeleteMessageID = "confirmDeleteThisMailingList";
+      confirmDeleteTitleID   = "confirmDeleteThisMailingListTitle";
+      break;
+    case kMultipleListsOnly:
+      confirmDeleteMessageID = "confirmDelete2orMoreMailingLists";
+      confirmDeleteTitleID   = "confirmDelete2orMoreMailingListsTitle";
+      break;
+    case kCardsOnly:
+      if (selectedDir.isMailList) {
+        // Contact(s) in mailing lists will be removed from the list, not deleted.
+        if (numSelectedItems == 1) {
+          confirmDeleteMessageID = "confirmRemoveThisContact";
+          confirmDeleteTitleID = "confirmRemoveThisContactTitle";
+        } else {
+          confirmDeleteMessageID = "confirmRemove2orMoreContacts";
+          confirmDeleteTitleID   = "confirmRemove2orMoreContactsTitle";
         }
-        else confirmDeleteMessage = gAddressBookBundle.getString("confirmDeleteMailingList");
-        confirm = promptService.confirm(window, null, confirmDeleteMessage);
+        // For removing contacts from mailing list, set placeholder value
+        containingListName = selectedDir.dirName;
+      } else {
+        // Contact(s) in address books will be deleted.
+        if (numSelectedItems == 1) {
+          confirmDeleteMessageID = "confirmDeleteThisContact";
+          confirmDeleteTitleID   = "confirmDeleteThisContactTitle";
+        } else {
+          confirmDeleteMessageID = "confirmDelete2orMoreContacts";
+          confirmDeleteTitleID   = "confirmDelete2orMoreContactsTitle";
+        }
+      }
+      if (numSelectedItems == 1) {
+        // Set item name for single contact.
+        let theCard = GetSelectedAbCards()[0];
+        let nameFormatFromPref = Services.prefs.getIntPref("mail.addr_book.lastnamefirst");
+        itemName = theCard.generateName(nameFormatFromPref);
+      }
+      break;
     }
 
-    return confirm;
+    // Get the raw model strings.
+    // For numSelectedItems == 1, it's simple strings.
+    // For messages with numSelectedItems > 1, it's multi-pluralform string sets.
+    // confirmDeleteMessage has placeholders for some forms.
+    confirmDeleteTitle   = gAddressBookBundle.getString(confirmDeleteTitleID);
+    confirmDeleteMessage = gAddressBookBundle.getString(confirmDeleteMessageID);
+
+    // Get plural form where applicable; substitute placeholders as required.
+    if (numSelectedItems == 1) {
+      // If single selected item, substitute itemName.
+      confirmDeleteMessage = confirmDeleteMessage.replace("#1", itemName);
+    } else {
+      // If multiple selected items, get the right plural string from the
+      // localized set, then substitute numSelectedItems.
+      confirmDeleteMessage = PluralForm.get(numSelectedItems, confirmDeleteMessage);
+      confirmDeleteMessage = confirmDeleteMessage.replace("#1", numSelectedItems);
+    }
+    // If contact(s) in a mailing list, substitute containingListName.
+    if (containingListName)
+      confirmDeleteMessage = confirmDeleteMessage.replace("#2", containingListName);
+
+    // Finally, show our smart confirmation message, and act upon it!
+    confirm = Services.prompt.confirm(window, confirmDeleteTitle,
+                                      confirmDeleteMessage);
+  }
+  
+  // if (types != kNothingSelected) {
+  //   let promptService = Components.classes["@mozilla.org/embedcomp/prompt-service;1"]
+  //                                     .getService(Components.interfaces.nsIPromptService);
+  //   let confirmDeleteTitle;
+  //   let confirmDeleteMessage;
+       
+  //   if (types == kListsAndCards) {
+  //     confirmDeleteTitle = gAddressBookBundle.getString("confirmDelete2orMoreContactsAndListsTitle");
+  //     confirmDeleteMessage = gAddressBookBundle.getString("confirmDelete2orMoreContactsAndLists");
+  //   }
+  //   else if (types == kMultipleListsOnly) {
+  //     confirmDeleteTitle = gAddressBookBundle.getString("confirmDeleteThisMailingListTitle");
+  //     confirmDeleteMessage = gAddressBookBundle.getString("confirmDeleteThisMailingList");
+  //   }
+  //   else if (types == kCardsOnly && gAbView && gAbView.selection) {
+  //     if (gAbView.selection.count < 2) {
+  //       confirmDeleteTitle = gAddressBookBundle.getString("confirmDeleteThisContact");
+  //       confirmDeleteMessage = gAddressBookBundle.getString("confirmDeleteThisContactTitle");
+  //     }
+  //     else {
+  //       confirmDeleteTitle = gAddressBookBundle.getString("confirmDelete2orMoreContactsTitle");
+  //       confirmDeleteMessage =  gAddressBookBundle.getString("confirmDelete2orMoreContacts");
+  //     }
+  //   }
+  //   else {
+  //     confirmDeleteTitle = gAddressBookBundle.getString("confirmDeleteThisMailingListTitle");
+  //     confirmDeleteMessage =  gAddressBookBundle.getString("confirmDeleteThisMailingList");
+  //   }
+
+  //   confirm = promptService.confirm(window, confirmDeleteTitle, confirmDeleteMessage);
+  // }
+
+  return confirm;
 }
 
 function SCAbDelete() {
@@ -544,30 +620,32 @@ function _SCDeleteListAsDirectory(directory, selectedDir) {
 }
 
 function SCAbConfirmDeleteDirectory(selectedDir) {
-    let confirmDeleteMessage;
-    
-    let prefBranch = (Components.classes["@mozilla.org/preferences-service;1"]
-          .getService(Components.interfaces.nsIPrefBranch));
+  let confirmDeleteTitle;
+  let confirmDeleteMessage;
+  let directory = GetDirectoryFromURI(selectedDir);
 
+  // Check if this address book is being used for collection
+  if (Services.prefs.getCharPref("mail.collect_addressbook") == selectedDir
+      && (Services.prefs.getBoolPref("mail.collect_email_address_outgoing")
+          || Services.prefs.getBoolPref("mail.collect_email_address_incoming")
+          || Services.prefs.getBoolPref("mail.collect_email_address_newsgroup"))) {
+    let brandShortName = document.getElementById("bundle_brand").getString("brandShortName");
+    confirmDeleteTitle = gAddressBookBundle.getString("confirmDeleteThisCollectionAddressbook");
+    confirmDeleteMessage = confirmDeleteMessage.replace("#2", brandShortName);
+  }
+  else {
+    confirmDeleteTitle = gAddressBookBundle.getString("confirmDeleteThisAddressbookTitle");
+    confirmDeleteMessage = gAddressBookBundle.getString("confirmDeleteThisAddressbook");    
+  }
 
-    // Check if this address book is being used for collection
-    if (prefBranch.getCharPref("mail.collect_addressbook") == selectedDir
-          && (prefBranch.getBoolPref("mail.collect_email_address_outgoing")
-          || prefBranch.getBoolPref("mail.collect_email_address_incoming")
-          || prefBranch.getBoolPref("mail.collect_email_address_newsgroup"))) {
-        let brandShortName = document.getElementById("bundle_brand").getString("brandShortName");
-        confirmDeleteMessage = gAddressBookBundle.getFormattedString("confirmDeleteCollectionAddressbook",
-                                                                     [brandShortName]);
-    }
-    else
-        confirmDeleteMessage = gAddressBookBundle.getString("confirmDeleteAddressbook");
+  confirmDeleteMessage = confirmDeleteMessage.replace("#1", directory.dirName);
 
-    let promptService = Components.classes["@mozilla.org/embedcomp/prompt-service;1"]
-                                  .getService(Components.interfaces.nsIPromptService);
+  let promptService = Components.classes["@mozilla.org/embedcomp/prompt-service;1"]
+      .getService(Components.interfaces.nsIPromptService);
 
-    return (promptService.confirm(window,
-                                  gAddressBookBundle.getString("confirmDeleteAddressbookTitle"),
-                                  confirmDeleteMessage));
+  return (promptService.confirm(window,
+                                confirmDeleteTitle,
+                                confirmDeleteMessage));
 }
 
 function SCSynchronizeFromChildWindow(uri) {
@@ -818,17 +896,26 @@ function SCOnCategoriesContextMenuItemCommand(event) {
 function SCSetSearchCriteria(menuitem) {
     let criteria = menuitem.getAttribute("sc-search-criteria");
     if (criteria.length > 0) {
-        gQueryURIFormat = "?(or(" + criteria + ",c,@V))"; // the "or" is important here
+      gQueryURIFormat = "(or(" + criteria + ",c,@V))"; // the "or" is important here
     }
     else {
-        let prefBranch = (Components.classes["@mozilla.org/preferences-service;1"]
-                .getService(Components.interfaces.nsIPrefBranch));
-        let nameOrEMailSearch = prefBranch.getComplexValue("mail.addr_book.quicksearchquery.format",
-                                                       Components.interfaces.nsIPrefLocalizedString).data;
-        gQueryURIFormat = nameOrEMailSearch;
+      //let prefBranch = (Components.classes["@mozilla.org/preferences-service;1"]
+      //                  .getService(Components.interfaces.nsIPrefBranch));
+      let nameOrEMailSearch = "";
+      if (Services.prefs.getComplexValue("mail.addr_book.show_phonetic_fields", Components.interfaces.nsIPrefLocalizedString).data == "true") {
+        nameOrEMailSearch =  Services.prefs.getCharPref("mail.addr_book.quicksearchquery.format.phonetic");
+      } else {
+        nameOrEMailSearch = Services.prefs.getCharPref("mail.addr_book.quicksearchquery.format");
+      }
+
+      // (or(DisplayName,c,@V)(FirstName,c,@V)(LastName,c,@V)(NickName,c,@V)(PrimaryEmail,c,@V)(SecondEmail,c,@V)(and(IsMailList,=,TRUE)(Notes,c,@V))(Company,c,@V)(Department,c,@V)(JobTitle,c,@V)(WebPage1,c,@V)(WebPage2,c,@V)(PhoneticFirstName,c,@V)(PhoneticLastName,c,@V))
+      if (nameOrEMailSearch.startsWith("?"))
+        nameOrEMailSearch = nameOrEMailSearch.slice(1);
+
+      gQueryURIFormat = nameOrEMailSearch;
     }
-    gSearchInput.setAttribute("emptytext", menuitem.getAttribute("label"));
-    gSearchInput.focus();
+    document.getElementById('peopleSearchInput').setAttribute("emptytext", menuitem.getAttribute("label"));
+    document.getElementById('peopleSearchInput').focus();
     onEnterInSearchBar();
 }
 

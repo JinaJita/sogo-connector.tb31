@@ -1,11 +1,13 @@
+Components.utils.import("resource://gre/modules/Services.jsm");
+
 let SCContactCategories = {
     getCategoriesAsString: function SCCC_getCategoriesAsString() {
         let cats = null;
 
-        let prefService = Components.classes["@mozilla.org/preferences-service;1"]
-                                    .getService(Components.interfaces.nsIPrefBranch);
+        //let prefService = Components.classes["@mozilla.org/preferences-service;1"]
+        //                            .getService(Components.interfaces.nsIPrefBranch);
         try {
-            cats = prefService.getCharPref("sogo-connector.contacts.categories");
+            cats = Services.prefs.getCharPref("sogo-connector.contacts.categories");
             cats = decodeURIComponent(escape(cats));
         }
         catch(e) {
@@ -19,9 +21,9 @@ let SCContactCategories = {
     },
 
     setCategoriesAsString: function SCCC_setCategoriesAsString(cats) {
-        let prefService = Components.classes["@mozilla.org/preferences-service;1"]
-                                    .getService(Components.interfaces.nsIPrefBranch);
-        prefService.setCharPref("sogo-connector.contacts.categories", unescape(encodeURIComponent(cats)));
+        //let prefService = Components.classes["@mozilla.org/preferences-service;1"]
+        //                            .getService(Components.interfaces.nsIPrefBranch);
+        Services.prefs.setCharPref("sogo-connector.contacts.categories", unescape(encodeURIComponent(cats)));
     },
 
     getCategoriesAsArray: function SCCC_getCategoriesAsArray() {
@@ -59,13 +61,16 @@ let SCContactCategories = {
     },
 
     _sortArray: function SCCC__sortArray(catsArray) {
-        let localeService = Components.classes["@mozilla.org/intl/nslocaleservice;1"]
-                                      .getService(Components.interfaces.nsILocaleService);
-        let collator = Components.classes["@mozilla.org/intl/collation-factory;1"]
-                                 .getService(Components.interfaces.nsICollationFactory)
-                                 .CreateCollation(localeService.getApplicationLocale());
-        function compare(a, b) { return collator.compareString(0, a, b); }
-        catsArray.sort(compare);
+      //let localeService = Components.classes["@mozilla.org/intl/nslocaleservice;1"]
+      //                              .getService(Components.interfaces.nsILocaleService);
+      //let collator = Components.classes["@mozilla.org/intl/collation-factory;1"]
+      //                         .getService(Components.interfaces.nsICollationFactory)
+      //                         .CreateCollation(localeService.getApplicationLocale());
+      let collator = Components.classes["@mozilla.org/intl/collation-factory;1"]
+          .getService(Components.interfaces.nsICollationFactory)
+          .CreateCollation();
+      function compare(a, b) { return collator.compareString(0, a, b); }
+      catsArray.sort(compare);
     },
 
     setCategoriesAsArray: function SCCC_getCategoriesAsArray(catsArray) {
